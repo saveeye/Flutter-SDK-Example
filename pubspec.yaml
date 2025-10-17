@@ -1,0 +1,25 @@
+name: saveeye_flutter_sdk_example
+description: "Example app demonstrating SaveEye Flutter SDK usage"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  saveeye_flutter_sdk:
+    path: ../
+  flutter_hooks: ^0.21.3+1
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  mobile_scanner: ^6.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
