@@ -21,6 +21,8 @@ Notes:
 
 ## Run the example
 
+Replace the app SDK key in main.dart with your actual app SDK key (Can be obtained from the manager).
+
 ```bash
 flutter pub get
 flutter run
