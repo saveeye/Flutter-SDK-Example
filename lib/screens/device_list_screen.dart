@@ -89,6 +89,22 @@ class DeviceListScreen extends HookWidget {
       );
     }
 
+    Future<void> _showAlarmThresholdDialog(Fragment$MyDevice device) async {
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => _AlarmThresholdDialog(
+          deviceId: device.id,
+          deviceName: device.alias ?? device.serial,
+          currentMaxWh: device.consumptionAlarmMaxWh,
+          client: client,
+        ),
+      );
+      // Refresh device list if thresholds were updated
+      if (result == true) {
+        fetchMyDevices();
+      }
+    }
+
     useEffect(() {
       fetchMyDevices();
       return null;
@@ -204,39 +220,78 @@ class DeviceListScreen extends HookWidget {
                         ...myDevices.value.map(
                           (d) => Padding(
                             padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: InkWell(
-                              onTap: () => _openUsage(d),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.flash_on,
-                                    size: 16,
-                                    color: Colors.blue,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: InkWell(
+                                    onTap: () => _openUsage(d),
+                                    child: Row(
                                       children: [
-                                        Text(d.alias ?? d.serial),
-                                        Text(
-                                          d.id,
-                                          style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 12,
+                                        const Icon(
+                                          Icons.flash_on,
+                                          size: 16,
+                                          color: Colors.blue,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(d.alias ?? d.serial),
+                                              Text(
+                                                d.id,
+                                                style: TextStyle(
+                                                  color: Colors.grey[600],
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                              if (d.consumptionAlarmMaxWh !=
+                                                  null)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: 4,
+                                                      ),
+                                                  child: Chip(
+                                                    label: Text(
+                                                      'Max: ${d.consumptionAlarmMaxWh} Wh',
+                                                      style: const TextStyle(
+                                                        fontSize: 10,
+                                                      ),
+                                                    ),
+                                                    padding: EdgeInsets.zero,
+                                                    materialTapTargetSize:
+                                                        MaterialTapTargetSize
+                                                            .shrinkWrap,
+                                                    visualDensity:
+                                                        const VisualDensity(
+                                                          horizontal: -4,
+                                                          vertical: -4,
+                                                        ),
+                                                  ),
+                                                ),
+                                            ],
                                           ),
+                                        ),
+                                        const Icon(
+                                          Icons.chevron_right,
+                                          size: 18,
+                                          color: Colors.grey,
                                         ),
                                       ],
                                     ),
                                   ),
-                                  const Icon(
-                                    Icons.chevron_right,
-                                    size: 18,
-                                    color: Colors.grey,
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.notifications_active,
+                                    size: 20,
                                   ),
-                                ],
-                              ),
+                                  tooltip: 'Set Alarm Thresholds',
+                                  onPressed: () => _showAlarmThresholdDialog(d),
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -379,6 +434,174 @@ class DeviceListScreen extends HookWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AlarmThresholdDialog extends HookWidget {
+  final String deviceId;
+  final String deviceName;
+  final int? currentMaxWh;
+  final SaveEyeClient client;
+
+  const _AlarmThresholdDialog({
+    required this.deviceId,
+    required this.deviceName,
+    this.currentMaxWh,
+    required this.client,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final maxWhController = useTextEditingController(
+      text: currentMaxWh?.toString() ?? '',
+    );
+    final isLoading = useState(false);
+    final error = useState<String?>(null);
+    final success = useState(false);
+
+    Future<void> _saveThresholds() async {
+      isLoading.value = true;
+      error.value = null;
+      success.value = false;
+
+      try {
+        final maxWh = maxWhController.text.trim().isEmpty
+            ? null
+            : int.tryParse(maxWhController.text.trim());
+
+        if (maxWhController.text.trim().isNotEmpty && maxWh == null) {
+          throw Exception('Maximum threshold must be a valid number');
+        }
+
+        await client.setDeviceAlarmThresholds(deviceId, maxWh);
+        success.value = true;
+        await Future.delayed(const Duration(seconds: 1));
+        if (context.mounted) {
+          Navigator.of(context).pop(true); // Return true to indicate success
+        }
+      } catch (e) {
+        error.value = e.toString();
+      } finally {
+        isLoading.value = false;
+      }
+    }
+
+    return AlertDialog(
+      title: const Text('Set Alarm Threshold'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Device: $deviceName',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            if (currentMaxWh != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  border: Border.all(color: Colors.blue.shade200),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Current Threshold:',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text('Max: $currentMaxWh Wh'),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            TextField(
+              controller: maxWhController,
+              decoration: InputDecoration(
+                labelText: 'Maximum Alarm (Wh)',
+                hintText: 'e.g., 5000',
+                border: const OutlineInputBorder(),
+                helperText: currentMaxWh != null
+                    ? 'Leave empty to clear current value (${currentMaxWh} Wh)'
+                    : 'Optional: Maximum consumption threshold',
+              ),
+              keyboardType: TextInputType.number,
+            ),
+            if (error.value != null) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  border: Border.all(color: Colors.red.shade200),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        error.value!,
+                        style: TextStyle(color: Colors.red.shade700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            if (success.value) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  border: Border.all(color: Colors.green.shade200),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green.shade700),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Alarm threshold updated successfully!',
+                      style: TextStyle(color: Colors.green),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: isLoading.value
+              ? null
+              : () {
+                  Navigator.of(context).pop();
+                },
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: isLoading.value ? null : _saveThresholds,
+          child: isLoading.value
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Save'),
+        ),
+      ],
     );
   }
 }

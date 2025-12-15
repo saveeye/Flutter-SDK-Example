@@ -1,9 +1,6 @@
 PODS:
   - connectivity_plus (0.0.1):
     - Flutter
-  - esp_provisioning_wifi (0.0.5):
-    - ESPProvision
-    - Flutter
   - ESPProvision (3.0.3):
     - ESPProvision/Core (= 3.0.3)
   - ESPProvision/Core (3.0.3):
@@ -110,17 +107,20 @@ PODS:
     - Flutter
   - PromisesObjC (2.4.0)
   - RecaptchaInterop (101.0.0)
+  - saveeye_provisioning (0.0.5):
+    - ESPProvision
+    - Flutter
   - SwiftProtobuf (1.22.1)
 
 DEPENDENCIES:
   - connectivity_plus (from `.symlinks/plugins/connectivity_plus/ios`)
-  - esp_provisioning_wifi (from `.symlinks/plugins/esp_provisioning_wifi/ios`)
   - firebase_auth (from `.symlinks/plugins/firebase_auth/ios`)
   - firebase_core (from `.symlinks/plugins/firebase_core/ios`)
   - Flutter (from `Flutter`)
   - mobile_scanner (from `.symlinks/plugins/mobile_scanner/ios`)
   - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
   - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
+  - saveeye_provisioning (from `.symlinks/plugins/saveeye_provisioning/ios`)
 
 SPEC REPOS:
   trunk:
@@ -149,8 +149,6 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   connectivity_plus:
     :path: ".symlinks/plugins/connectivity_plus/ios"
-  esp_provisioning_wifi:
-    :path: ".symlinks/plugins/esp_provisioning_wifi/ios"
   firebase_auth:
     :path: ".symlinks/plugins/firebase_auth/ios"
   firebase_core:
@@ -163,10 +161,11 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/path_provider_foundation/darwin"
   permission_handler_apple:
     :path: ".symlinks/plugins/permission_handler_apple/ios"
+  saveeye_provisioning:
+    :path: ".symlinks/plugins/saveeye_provisioning/ios"
 
 SPEC CHECKSUMS:
   connectivity_plus: cb623214f4e1f6ef8fe7403d580fdad517d2f7dd
-  esp_provisioning_wifi: c70f50862f09171b895dd7db353d810dac7a4111
   ESPProvision: 2368cd8dabef74272f50c76290891a9674035929
   Firebase: d99ac19b909cd2c548339c2241ecd0d1599ab02e
   firebase_auth: 50af8366c87bb88c80ebeae62eb60189c7246b9b
@@ -193,6 +192,7 @@ SPEC CHECKSUMS:
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
   PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
   RecaptchaInterop: 11e0b637842dfb48308d242afc3f448062325aba
+  saveeye_provisioning: 7f8dd403763ff353739e651e6d181f21078a5d54
   SwiftProtobuf: 7773c4e96a99d7b8ab7cda0fc30a883732ff93b1
 
 PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e

@@ -47,4 +47,4 @@ app.*.map.json
 # Firebase configuration files (contains sensitive keys)
 # Note: Email/password auth doesn't require google-services.json
 android/app/google-services.json
-ios/Runner/GoogleService-Info.plist
+ios/GoogleService-Info.plist

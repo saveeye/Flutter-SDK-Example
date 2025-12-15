@@ -105,15 +105,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.7"
-  esp_provisioning_wifi:
-    dependency: transitive
-    description:
-      path: "."
-      ref: master
-      resolved-ref: e81b41d55a54ec840f87b6f99b608887adf86404
-      url: "https://github.com/saveeye/esp_provisioning_wifi.git"
-    source: git
-    version: "0.0.7"
   fake_async:
     dependency: transitive
     description:
@@ -559,7 +550,15 @@ packages:
       path: ".."
       relative: true
     source: path
-    version: "0.0.1"
+    version: "0.0.2"
+  saveeye_provisioning:
+    dependency: transitive
+    description:
+      name: saveeye_provisioning
+      sha256: "4daf7d72a46a936c94b41b94066d9bf3afbd7f071b232040e70de7dc6c280173"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.4"
   sky_engine:
     dependency: transitive
     description: flutter
