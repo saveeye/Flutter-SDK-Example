@@ -95,13 +95,90 @@ class DeviceListScreen extends HookWidget {
         builder: (context) => _AlarmThresholdDialog(
           deviceId: device.id,
           deviceName: device.alias ?? device.serial,
-          currentMaxWh: device.consumptionAlarmMaxWh,
+          currentMaxWh: device.plusDevice?.consumptionAlarmMaxWh,
           client: client,
         ),
       );
       // Refresh device list if thresholds were updated
       if (result == true) {
         fetchMyDevices();
+      }
+    }
+
+    Future<void> _unpairDevice(Fragment$MyDevice device) async {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Unpair Device'),
+          content: Text(
+            'Are you sure you want to unpair "${device.alias ?? device.serial}"? '
+            'This will remove the device from your account.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Unpair'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true || !context.mounted) return;
+
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Unpairing device...'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      try {
+        await client.unpairDevice(device.id);
+        if (context.mounted) {
+          Navigator.of(context).pop(); // Close loading dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Device "${device.alias ?? device.serial}" unpaired successfully',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+          // Refresh device list
+          fetchMyDevices();
+        }
+      } catch (e) {
+        if (context.mounted) {
+          Navigator.of(context).pop(); // Close loading dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error unpairing device: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
 
@@ -246,7 +323,9 @@ class DeviceListScreen extends HookWidget {
                                                   fontSize: 12,
                                                 ),
                                               ),
-                                              if (d.consumptionAlarmMaxWh !=
+                                              if (d
+                                                      .plusDevice
+                                                      ?.consumptionAlarmMaxWh !=
                                                   null)
                                                 Padding(
                                                   padding:
@@ -255,7 +334,7 @@ class DeviceListScreen extends HookWidget {
                                                       ),
                                                   child: Chip(
                                                     label: Text(
-                                                      'Max: ${d.consumptionAlarmMaxWh} Wh',
+                                                      'Max: ${d.plusDevice?.consumptionAlarmMaxWh} Wh',
                                                       style: const TextStyle(
                                                         fontSize: 10,
                                                       ),
@@ -290,6 +369,15 @@ class DeviceListScreen extends HookWidget {
                                   ),
                                   tooltip: 'Set Alarm Thresholds',
                                   onPressed: () => _showAlarmThresholdDialog(d),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.link_off,
+                                    size: 20,
+                                    color: Colors.red,
+                                  ),
+                                  tooltip: 'Unpair Device',
+                                  onPressed: () => _unpairDevice(d),
                                 ),
                               ],
                             ),

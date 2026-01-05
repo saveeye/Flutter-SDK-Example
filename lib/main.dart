@@ -26,10 +26,9 @@ void main() async {
   try {
     print('Initializing SaveEye SDK');
     SaveEyeClient.instance.initialize(
-      'OgCQXDWFKMZxfoPGApvdNJUsu3shszooDK5m+ClUEKg=', // Replace with your actual SDK key
+      'I0jvND52wY5Qk7kHuqvLa5cJ+jdNwAKUskI6pjBqNnQ=', // Replace with your actual SDK key
       () async {
         // This function should return a JWT token
-        // In a real app, you would get this from your authentication system
         final token = await FirebaseAuth.instance.currentUser?.getIdToken();
         if (token == null) {
           throw Exception(
@@ -38,6 +37,8 @@ void main() async {
         }
         return token;
       },
+      environment: SaveEyeEnvironment.dev,
+      debug: true,
     );
   } catch (e) {
     print('SaveEye SDK initialization failed: $e');
