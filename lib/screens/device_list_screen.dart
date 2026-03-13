@@ -3,10 +3,8 @@ import 'dart:async';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:saveeye_flutter_sdk/saveeye_flutter_sdk.dart';
-// Removed unused wifi_networks_screen import after refactor
-import 'provisioning_status_screen.dart';
-import 'qr_scan_screen.dart';
 import 'device_usage_history_screen.dart';
+import 'led_state_screen.dart';
 
 class DeviceListScreen extends HookWidget {
   const DeviceListScreen({super.key});
@@ -20,9 +18,26 @@ class DeviceListScreen extends HookWidget {
     final isLoadingMyDevices = useState(false);
     final myDevicesError = useState<String?>(null);
 
-    final nearbyDevices = useState<List<String>>([]);
-    final isLoadingNearby = useState(false);
-    final nearbyError = useState<String?>(null);
+    final healthOk = useState<bool?>(null);
+
+    Future<void> _startAddDeviceFlow() async {
+      if (!context.mounted) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const LedStateScreen(),
+        ),
+      );
+    }
+
+    Future<void> checkHealth() async {
+      try {
+        healthOk.value = await client.healthCheck();
+      } catch (_) {
+        healthOk.value = false;
+      }
+    }
 
     Future<void> fetchMyDevices() async {
       isLoadingMyDevices.value = true;
@@ -34,22 +49,6 @@ class DeviceListScreen extends HookWidget {
         myDevicesError.value = e.toString();
       } finally {
         isLoadingMyDevices.value = false;
-      }
-    }
-
-    Future<void> fetchNearbyDevices() async {
-      isLoadingNearby.value = true;
-      nearbyError.value = null;
-
-      try {
-        final devices = await client.getSaveEyeDevicesNearby();
-        nearbyDevices.value = devices;
-        print('Nearby devices found: ${devices.length}');
-      } catch (e) {
-        nearbyError.value = e.toString();
-        print('Error fetching nearby devices: $e');
-      } finally {
-        isLoadingNearby.value = false;
       }
     }
 
@@ -65,19 +64,6 @@ class DeviceListScreen extends HookWidget {
       }
     }
 
-    Future<void> _startProvisioning(String bleName) async {
-      if (!context.mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ProvisioningStatusScreen(
-            qrOrBle: bleName,
-            initialDisplayId: bleName,
-            skipOnlineCheck: true,
-          ),
-        ),
-      );
-    }
-
     void _openUsage(Fragment$MyDevice d) {
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -89,6 +75,20 @@ class DeviceListScreen extends HookWidget {
       );
     }
 
+    Future<void> _showEditDeviceDialog(Fragment$MyDevice device) async {
+      if (!context.mounted) return;
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => _EditAliasDialog(
+          deviceId: device.id,
+          deviceName: device.alias ?? device.serial,
+          currentAlias: device.alias ?? '',
+          client: client,
+        ),
+      );
+      if (result == true) fetchMyDevices();
+    }
+
     Future<void> _showAlarmThresholdDialog(Fragment$MyDevice device) async {
       final result = await showDialog<bool>(
         context: context,
@@ -96,6 +96,7 @@ class DeviceListScreen extends HookWidget {
           deviceId: device.id,
           deviceName: device.alias ?? device.serial,
           currentMaxWh: device.plusDevice?.consumptionAlarmMaxWh,
+          currentMinWh: null,
           client: client,
         ),
       );
@@ -184,6 +185,7 @@ class DeviceListScreen extends HookWidget {
 
     useEffect(() {
       fetchMyDevices();
+      checkHealth();
       return null;
     }, const []);
 
@@ -195,6 +197,15 @@ class DeviceListScreen extends HookWidget {
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
+          if (healthOk.value != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 8, top: 14),
+              child: Icon(
+                healthOk.value! ? Icons.cloud_done : Icons.cloud_off,
+                color: healthOk.value! ? Colors.greenAccent : Colors.orangeAccent,
+                size: 22,
+              ),
+            ),
           PopupMenuButton<String>(
             onSelected: (value) {
               if (value == 'signout') {
@@ -261,6 +272,15 @@ class DeviceListScreen extends HookWidget {
               ),
             ),
             const SizedBox(height: 24),
+            SizedBox(
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: _startAddDeviceFlow,
+                icon: const Icon(Icons.add),
+                label: const Text('Add device'),
+              ),
+            ),
+            const SizedBox(height: 16),
             Text(
               'My Devices',
               style: Theme.of(context).textTheme.headlineSmall,
@@ -323,6 +343,53 @@ class DeviceListScreen extends HookWidget {
                                                   fontSize: 12,
                                                 ),
                                               ),
+                                              if (d.plusDevice?.errorCode != null)
+                                                Padding(
+                                                  padding: const EdgeInsets.only(
+                                                    top: 4,
+                                                  ),
+                                                  child: Row(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment.start,
+                                                    children: [
+                                                      const Icon(
+                                                        Icons.warning,
+                                                        size: 14,
+                                                        color: Colors.red,
+                                                      ),
+                                                      const SizedBox(width: 4),
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Text(
+                                                              _getDeviceErrorMessage(
+                                                                d.plusDevice!
+                                                                    .errorCode!,
+                                                              ),
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .red
+                                                                    .shade700,
+                                                                fontSize: 12,
+                                                              ),
+                                                            ),
+                                                            Text(
+                                                              'Error code: ${d.plusDevice!.errorCode}',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .grey[600],
+                                                                fontSize: 11,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
                                               if (d
                                                       .plusDevice
                                                       ?.consumptionAlarmMaxWh !=
@@ -361,6 +428,14 @@ class DeviceListScreen extends HookWidget {
                                       ],
                                     ),
                                   ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.edit,
+                                    size: 20,
+                                  ),
+                                  tooltip: 'Edit alias & settings',
+                                  onPressed: () => _showEditDeviceDialog(d),
                                 ),
                                 IconButton(
                                   icon: const Icon(
@@ -403,122 +478,6 @@ class DeviceListScreen extends HookWidget {
                     ],
                   ),
                 ),
-            const SizedBox(height: 24),
-
-            // Provisioning status UI moved to ProvisioningStatusScreen
-
-            // Nearby Devices Section
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 16),
-            Text(
-              'Nearby SaveEye Devices',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: isLoadingNearby.value ? null : fetchNearbyDevices,
-              icon: isLoadingNearby.value
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.bluetooth_searching),
-              label: Text(
-                isLoadingNearby.value
-                    ? 'Scanning...'
-                    : 'Scan for Nearby Devices',
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 48,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const QrScanScreen()),
-                  );
-                },
-                icon: const Icon(Icons.qr_code_scanner),
-                label: const Text('Add Device via QR Code'),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (nearbyError.value != null)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  border: Border.all(color: Colors.red.shade200),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'Error: ${nearbyError.value}',
-                  style: TextStyle(color: Colors.red.shade700),
-                ),
-              ),
-            if (nearbyDevices.value.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Found ${nearbyDevices.value.length} device(s)',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      ...nearbyDevices.value.map(
-                        (deviceIdStr) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: InkWell(
-                            onTap: () => _startProvisioning(deviceIdStr),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.bluetooth,
-                                  size: 16,
-                                  color: Colors.blue,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(child: Text(deviceIdStr)),
-                                const Icon(
-                                  Icons.chevron_right,
-                                  size: 18,
-                                  color: Colors.grey,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ] else if (!isLoadingNearby.value && nearbyError.value == null) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
-                  border: Border.all(color: Colors.grey.shade200),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.grey),
-                    SizedBox(width: 8),
-                    Text(
-                      'No nearby devices found. Tap "Scan for Nearby Devices" to search.',
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ],
         ),
       ),
@@ -526,16 +485,54 @@ class DeviceListScreen extends HookWidget {
   }
 }
 
+String _getDeviceErrorMessage(String errorCode) {
+  // Reuse the same error messages as the onboarding wait screen,
+  // but keep the implementation minimal for this example app.
+  switch (errorCode) {
+    case 'DecryptionError':
+    case 'AuthenticationFailure':
+    case 'SecurityError':
+      return 'There was a security or decryption issue while talking to the meter.';
+    case 'ACKError':
+      return 'Error connecting to the device. Try reconnecting the device to the meter.';
+    case 'Timeout':
+      return 'No response from meter. The port might be closed or the device is not properly connected.';
+    case 'LengthMismatch':
+    case 'SequenceError':
+    case 'InvalidData':
+      return 'Invalid message received from meter. If the error persists it could be a connection or hardware issue.';
+    case 'CRCError':
+      return "Invalid data received from meter. Try removing the splitter if you're using one.";
+    case 'IdentificationError':
+      return 'Error communicating with the meter. If the error persists contact customer support.';
+    case 'NegotiateError':
+      return 'The device had trouble negotiating with the meter. Try adjusting the placement of the device.';
+    case 'LogonError':
+      return 'Error while communicating with the meter. If the error persists it could be a hardware issue.';
+    case 'ReadError':
+      return 'Error reading data from the meter.';
+    case 'InvalidDeviceID':
+    case 'InitializationError':
+    case 'AssociationError':
+      return "Couldn't read data from meter. Contact customer support.";
+    default:
+      return 'The device reported an error. If this persists, contact customer support.';
+  }
+}
+
+
 class _AlarmThresholdDialog extends HookWidget {
   final String deviceId;
   final String deviceName;
   final int? currentMaxWh;
+  final int? currentMinWh;
   final SaveEyeClient client;
 
   const _AlarmThresholdDialog({
     required this.deviceId,
     required this.deviceName,
     this.currentMaxWh,
+    this.currentMinWh,
     required this.client,
   });
 
@@ -543,6 +540,9 @@ class _AlarmThresholdDialog extends HookWidget {
   Widget build(BuildContext context) {
     final maxWhController = useTextEditingController(
       text: currentMaxWh?.toString() ?? '',
+    );
+    final minWhController = useTextEditingController(
+      text: currentMinWh?.toString() ?? '',
     );
     final isLoading = useState(false);
     final error = useState<String?>(null);
@@ -557,12 +557,22 @@ class _AlarmThresholdDialog extends HookWidget {
         final maxWh = maxWhController.text.trim().isEmpty
             ? null
             : int.tryParse(maxWhController.text.trim());
+        final minWh = minWhController.text.trim().isEmpty
+            ? null
+            : int.tryParse(minWhController.text.trim());
 
         if (maxWhController.text.trim().isNotEmpty && maxWh == null) {
           throw Exception('Maximum threshold must be a valid number');
         }
+        if (minWhController.text.trim().isNotEmpty && minWh == null) {
+          throw Exception('Minimum threshold must be a valid number');
+        }
 
-        await client.setDeviceAlarmThresholds(deviceId, maxWh);
+        await client.setDeviceAlarmThresholds(
+          deviceId,
+          alarmMaxWh: maxWh,
+          alarmMinWh: minWh,
+        );
         success.value = true;
         await Future.delayed(const Duration(seconds: 1));
         if (context.mounted) {
@@ -586,7 +596,7 @@ class _AlarmThresholdDialog extends HookWidget {
               'Device: $deviceName',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
-            if (currentMaxWh != null) ...[
+            if (currentMaxWh != null || currentMinWh != null) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -599,13 +609,13 @@ class _AlarmThresholdDialog extends HookWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Current Threshold:',
+                      'Current thresholds:',
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text('Max: $currentMaxWh Wh'),
+                    Text('Max: ${currentMaxWh ?? '—'} Wh, Min: ${currentMinWh ?? '—'} Wh'),
                   ],
                 ),
               ),
@@ -617,9 +627,17 @@ class _AlarmThresholdDialog extends HookWidget {
                 labelText: 'Maximum Alarm (Wh)',
                 hintText: 'e.g., 5000',
                 border: const OutlineInputBorder(),
-                helperText: currentMaxWh != null
-                    ? 'Leave empty to clear current value (${currentMaxWh} Wh)'
-                    : 'Optional: Maximum consumption threshold',
+                helperText: 'Leave empty to clear',
+              ),
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: minWhController,
+              decoration: const InputDecoration(
+                labelText: 'Minimum Alarm (Wh)',
+                hintText: 'Optional',
+                border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.number,
             ),
@@ -687,6 +705,82 @@ class _AlarmThresholdDialog extends HookWidget {
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
+              : const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+class _EditAliasDialog extends HookWidget {
+  final String deviceId;
+  final String deviceName;
+  final String currentAlias;
+  final SaveEyeClient client;
+
+  const _EditAliasDialog({
+    required this.deviceId,
+    required this.deviceName,
+    required this.currentAlias,
+    required this.client,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final aliasController = useTextEditingController(text: currentAlias);
+    final isLoading = useState(false);
+    final error = useState<String?>(null);
+
+    Future<void> _save() async {
+      isLoading.value = true;
+      error.value = null;
+      try {
+        final name = aliasController.text.trim();
+        if (name.isEmpty) {
+          throw Exception('Alias cannot be empty');
+        }
+        await client.setDeviceAlias(deviceId, name);
+        if (context.mounted) Navigator.of(context).pop(true);
+      } catch (e) {
+        error.value = e.toString();
+      } finally {
+        isLoading.value = false;
+      }
+    }
+
+    return AlertDialog(
+      title: const Text('Edit device alias'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Device: $deviceName', style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 16),
+          TextField(
+            controller: aliasController,
+            decoration: const InputDecoration(
+              labelText: 'Alias',
+              hintText: 'e.g. Living room',
+              border: OutlineInputBorder(),
+            ),
+            textCapitalization: TextCapitalization.words,
+            onSubmitted: (_) => _save(),
+          ),
+          if (error.value != null) ...[
+            const SizedBox(height: 12),
+            Text(error.value!, style: TextStyle(color: Colors.red.shade700)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: isLoading.value ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: isLoading.value ? null : _save,
+          child: isLoading.value
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Save'),
         ),
       ],

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:saveeye_flutter_sdk/saveeye_flutter_sdk.dart';
-import 'onboarding_wait_screen.dart';
+import 'onboarding_complete_screen.dart';
 
 class WifiPassphraseScreen extends HookWidget {
   const WifiPassphraseScreen({
@@ -34,7 +34,7 @@ class WifiPassphraseScreen extends HookWidget {
         if (!context.mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (_) => OnboardingWaitScreen(deviceId: deviceId),
+            builder: (_) => const OnboardingCompleteScreen(),
           ),
         );
       } catch (e) {

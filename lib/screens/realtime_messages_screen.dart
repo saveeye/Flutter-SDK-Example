@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:saveeye_flutter_sdk/saveeye_flutter_sdk.dart';
-import 'package:saveeye_flutter_sdk/src/websocket_manager.dart';
-import 'package:saveeye_flutter_sdk/src/realtime_models.dart';
 
 class RealtimeMessagesScreen extends HookWidget {
   final String deviceId;
@@ -32,9 +30,9 @@ class RealtimeMessagesScreen extends HookWidget {
         }
       });
 
-      // Cleanup: unsubscribe on unmount
+      // Cleanup: unsubscribe this device only (per-device subscriptions)
       return () {
-        client.unsubscribeFromRealtimeData();
+        client.unsubscribeFromRealtimeData(deviceId);
       };
     }, const []);
 

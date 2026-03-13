@@ -22,13 +22,23 @@ void main() async {
     firebaseInitialized = false;
   }
 
-  // Initialize SaveEye SDK
+  // Initialize SaveEye SDK (aligned with React Native SDK API)
+  String? deviceLocale;
+  try {
+    final locale = WidgetsBinding.instance.platformDispatcher.locale;
+    deviceLocale = locale.countryCode != null &&
+            locale.countryCode!.isNotEmpty
+        ? '${locale.languageCode}-${locale.countryCode}'
+        : locale.languageCode;
+  } catch (_) {
+    deviceLocale = null;
+  }
+
   try {
     print('Initializing SaveEye SDK');
     SaveEyeClient.instance.initialize(
       'CNrlw0s0ckK0KjrbwHMDkz6Jo0V3a8BJrCuEOaQn7qM=', // Replace with your actual SDK key
       () async {
-        // This function should return a JWT token
         final token = await FirebaseAuth.instance.currentUser?.getIdToken();
         if (token == null) {
           throw Exception(
@@ -38,7 +48,15 @@ void main() async {
         return token;
       },
       environment: SaveEyeEnvironment.prod,
+      locale: deviceLocale,
       debug: true,
+      onError: (error, extra) {
+        // Forward SDK errors to your logging or Sentry
+        print('SaveEye SDK error: $error');
+        if (extra != null && extra.isNotEmpty) {
+          print('  extra: $extra');
+        }
+      },
     );
   } catch (e) {
     print('SaveEye SDK initialization failed: $e');
@@ -72,10 +90,19 @@ class AuthWrapper extends HookWidget {
     return StreamBuilder(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const AuthScreen();
+        switch (snapshot.connectionState) {
+          case ConnectionState.none:
+          case ConnectionState.waiting:
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          case ConnectionState.active:
+          case ConnectionState.done:
+            if (snapshot.hasData && snapshot.data != null) {
+              return const DeviceListScreen();
+            }
+            return const AuthScreen();
         }
-        return const DeviceListScreen();
       },
     );
   }
