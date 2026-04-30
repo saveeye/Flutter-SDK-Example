@@ -45,8 +45,16 @@ class DeviceListScreen extends HookWidget {
       try {
         final devices = await client.getMyDevices();
         myDevices.value = devices;
-      } catch (e) {
-        myDevicesError.value = e.toString();
+      } catch (_) {
+        // First attempt failed (often a transient timeout on cold start while
+        // Firebase refreshes the auth token). Retry once after a short delay.
+        try {
+          await Future.delayed(const Duration(seconds: 2));
+          final devices = await client.getMyDevices();
+          myDevices.value = devices;
+        } catch (e) {
+          myDevicesError.value = e.toString();
+        }
       } finally {
         isLoadingMyDevices.value = false;
       }
@@ -79,10 +87,11 @@ class DeviceListScreen extends HookWidget {
       if (!context.mounted) return;
       final result = await showDialog<bool>(
         context: context,
-        builder: (context) => _EditAliasDialog(
+        builder: (context) => _EditDeviceSettingsDialog(
           deviceId: device.id,
           deviceName: device.alias ?? device.serial,
           currentAlias: device.alias ?? '',
+          currentRmsCurrentMax: device.plusDevice?.rmsCurrentMaxPerPhaseAmpere,
           client: client,
         ),
       );
@@ -104,6 +113,19 @@ class DeviceListScreen extends HookWidget {
       if (result == true) {
         fetchMyDevices();
       }
+    }
+
+    Future<void> _showAlarmConfigDialog(Fragment$MyDevice device) async {
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => _AlarmConfigDialog(
+          deviceId: device.id,
+          deviceName: device.alias ?? device.serial,
+          rmsCurrentMaxPerPhase: device.plusDevice?.rmsCurrentMaxPerPhaseAmpere,
+          client: client,
+        ),
+      );
     }
 
     Future<void> _unpairDevice(Fragment$MyDevice device) async {
@@ -300,9 +322,19 @@ class DeviceListScreen extends HookWidget {
                   border: Border.all(color: Colors.red.shade200),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(
-                  'Error: ${myDevicesError.value}',
-                  style: TextStyle(color: Colors.red.shade700),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Error: ${myDevicesError.value}',
+                        style: TextStyle(color: Colors.red.shade700),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: fetchMyDevices,
+                      child: const Text('Retry'),
+                    ),
+                  ],
                 ),
               ),
             if (!isLoadingMyDevices.value && myDevicesError.value == null)
@@ -444,6 +476,15 @@ class DeviceListScreen extends HookWidget {
                                   ),
                                   tooltip: 'Set Alarm Thresholds',
                                   onPressed: () => _showAlarmThresholdDialog(d),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.warning_amber_rounded,
+                                    size: 20,
+                                    color: Colors.orange,
+                                  ),
+                                  tooltip: 'Advanced Alarms',
+                                  onPressed: () => _showAlarmConfigDialog(d),
                                 ),
                                 IconButton(
                                   icon: const Icon(
@@ -712,22 +753,709 @@ class _AlarmThresholdDialog extends HookWidget {
   }
 }
 
-class _EditAliasDialog extends HookWidget {
+// ─── Advanced Alarm Config Dialog ────────────────────────────────────────────
+
+class _AlarmConfigDialog extends HookWidget {
+  final String deviceId;
+  final String deviceName;
+  final double? rmsCurrentMaxPerPhase;
+  final SaveEyeClient client;
+
+  const _AlarmConfigDialog({
+    required this.deviceId,
+    required this.deviceName,
+    this.rmsCurrentMaxPerPhase,
+    required this.client,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isLoading = useState(true);
+    final error = useState<String?>(null);
+    final successMsg = useState<String?>(null);
+
+    // Current configs
+    final energyConfig = useState<
+      Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceEnergyUsageLimitAlarmConfiguration?
+    >(null);
+    final fuseConfig = useState<
+      Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceFuseOverloadAlarmConfiguration?
+    >(null);
+    final lowPowerConfig = useState<
+      Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceLowPowerAlarmConfiguration?
+    >(null);
+    final offlineConfig = useState<
+      Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceOfflineAlarmConfiguration?
+    >(null);
+
+    // Offline alarm controllers
+    final offlineThresholdController = useTextEditingController(text: '600');
+    final offlineEnabled = useState(true);
+
+    // Energy usage limit alarm controllers
+    final energyThresholdController = useTextEditingController(text: '5000');
+    final evaluationWindowController = useTextEditingController(text: '60');
+    final energyEnabled = useState(true);
+
+    // Fuse overload alarm controllers
+    final fuseEnabled = useState(true);
+    final fuseTriggerMode = useState(Enum$AlarmTriggerMode.SINGLE_DATAPOINT);
+    final fuseCriticalController = useTextEditingController(text: '100');
+    final fuseWarningController = useTextEditingController(text: '80');
+    final fuseCriticalDpController = useTextEditingController(text: '3');
+    final fuseCriticalDurController = useTextEditingController(text: '60');
+    final fuseWarningDpController = useTextEditingController(text: '3');
+    final fuseWarningDurController = useTextEditingController(text: '60');
+
+    // Low power alarm controllers
+    final lowPowerEnabled = useState(true);
+    final lowPowerTriggerMode = useState(Enum$AlarmTriggerMode.SINGLE_DATAPOINT);
+    final lowPowerThresholdController = useTextEditingController(text: '10');
+    final lowPowerDpController = useTextEditingController(text: '3');
+    final lowPowerDurController = useTextEditingController(text: '60');
+
+    Future<void> loadConfigs() async {
+      isLoading.value = true;
+      error.value = null;
+      try {
+        final e = await client.getEnergyUsageLimitAlarmConfiguration(deviceId);
+        final f = await client.getFuseOverloadAlarmConfiguration(deviceId);
+        final l = await client.getLowPowerAlarmConfiguration(deviceId);
+        final o = await client.getOfflineAlarmConfiguration(deviceId);
+        energyConfig.value = e;
+        fuseConfig.value = f;
+        lowPowerConfig.value = l;
+        offlineConfig.value = o;
+        if (o != null) {
+          offlineThresholdController.text = o.offlineThresholdSeconds.toString();
+          offlineEnabled.value = o.isEnabled;
+        }
+        if (e != null) {
+          energyThresholdController.text = e.energyThresholdWh.toString();
+          evaluationWindowController.text = e.evaluationWindowMinutes.toString();
+          energyEnabled.value = e.isEnabled;
+        }
+        if (f != null) {
+          fuseEnabled.value = f.isEnabled;
+          fuseTriggerMode.value = f.triggerMode;
+          fuseCriticalController.text = f.criticalThresholdPercent.toString();
+          fuseWarningController.text = f.warningThresholdPercent.toString();
+          if (f.criticalDatapoints != null) fuseCriticalDpController.text = f.criticalDatapoints.toString();
+          if (f.criticalDurationSeconds != null) fuseCriticalDurController.text = f.criticalDurationSeconds.toString();
+          if (f.warningDatapoints != null) fuseWarningDpController.text = f.warningDatapoints.toString();
+          if (f.warningDurationSeconds != null) fuseWarningDurController.text = f.warningDurationSeconds.toString();
+        }
+        if (l != null) {
+          lowPowerEnabled.value = l.isEnabled;
+          lowPowerTriggerMode.value = l.triggerMode;
+          lowPowerThresholdController.text = l.powerThresholdW.toString();
+          if (l.datapoints != null) lowPowerDpController.text = l.datapoints.toString();
+          if (l.durationSeconds != null) lowPowerDurController.text = l.durationSeconds.toString();
+        }
+      } catch (e) {
+        error.value = e.toString();
+      } finally {
+        isLoading.value = false;
+      }
+    }
+
+    Future<void> saveOfflineAlarm() async {
+      final threshold = int.tryParse(offlineThresholdController.text.trim());
+      if (threshold == null || threshold < 300) {
+        error.value = 'Offline threshold must be at least 300 seconds.';
+        return;
+      }
+      error.value = null;
+      successMsg.value = null;
+      try {
+        await client.addOrUpdateOfflineAlarm(
+          Input$AddOrUpdatePlusDeviceOfflineAlarmConfigurationInput(
+            deviceId: deviceId,
+            isEnabled: offlineEnabled.value,
+            offlineThresholdSeconds: threshold,
+          ),
+        );
+        successMsg.value = 'Offline alarm saved.';
+        await loadConfigs();
+      } catch (e) {
+        error.value = e.toString();
+      }
+    }
+
+    Future<void> saveEnergyUsageLimitAlarm() async {
+      final threshold = int.tryParse(energyThresholdController.text.trim());
+      final window = int.tryParse(evaluationWindowController.text.trim());
+      if (threshold == null || threshold <= 0) {
+        error.value = 'Energy threshold must be a positive number.';
+        return;
+      }
+      if (window == null || window <= 0) {
+        error.value = 'Evaluation window must be a positive number.';
+        return;
+      }
+      error.value = null;
+      successMsg.value = null;
+      try {
+        await client.addOrUpdateEnergyUsageLimitAlarm(
+          Input$AddOrUpdateEnergyUsageLimitAlarmConfigurationInput(
+            deviceId: deviceId,
+            isEnabled: energyEnabled.value,
+            energyThresholdWh: threshold,
+            evaluationWindowMinutes: window,
+          ),
+        );
+        successMsg.value = 'Energy usage limit alarm saved.';
+        await loadConfigs();
+      } catch (e) {
+        error.value = e.toString();
+      }
+    }
+
+    Future<void> saveFuseOverloadAlarm() async {
+      final critical = int.tryParse(fuseCriticalController.text.trim());
+      final warning = int.tryParse(fuseWarningController.text.trim());
+      if (critical == null || critical <= 0 || critical > 200) {
+        error.value = 'Critical threshold must be between 1 and 200.';
+        return;
+      }
+      if (warning == null || warning <= 0 || warning >= critical) {
+        error.value = 'Warning threshold must be positive and less than critical threshold.';
+        return;
+      }
+      int? critDp, critDur, warnDp, warnDur;
+      if (fuseTriggerMode.value == Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) {
+        critDp = int.tryParse(fuseCriticalDpController.text.trim());
+        warnDp = int.tryParse(fuseWarningDpController.text.trim());
+        if (critDp == null || critDp <= 0) { error.value = 'Critical datapoints must be a positive integer.'; return; }
+        if (warnDp == null || warnDp <= 0) { error.value = 'Warning datapoints must be a positive integer.'; return; }
+      } else if (fuseTriggerMode.value == Enum$AlarmTriggerMode.DURATION) {
+        critDur = int.tryParse(fuseCriticalDurController.text.trim());
+        warnDur = int.tryParse(fuseWarningDurController.text.trim());
+        if (critDur == null || critDur <= 0) { error.value = 'Critical duration must be a positive integer.'; return; }
+        if (warnDur == null || warnDur <= 0) { error.value = 'Warning duration must be a positive integer.'; return; }
+      }
+      error.value = null;
+      successMsg.value = null;
+      try {
+        await client.addOrUpdateFuseOverloadAlarm(
+          Input$AddOrUpdatePlusDeviceFuseOverloadAlarmConfigurationInput(
+            deviceId: deviceId,
+            isEnabled: fuseEnabled.value,
+            criticalThresholdPercent: critical,
+            warningThresholdPercent: warning,
+            triggerMode: fuseTriggerMode.value,
+            criticalDatapoints: critDp,
+            criticalDurationSeconds: critDur,
+            warningDatapoints: warnDp,
+            warningDurationSeconds: warnDur,
+          ),
+        );
+        successMsg.value = 'Fuse overload alarm saved.';
+        await loadConfigs();
+      } catch (e) {
+        error.value = e.toString();
+      }
+    }
+
+    Future<void> saveLowPowerAlarm() async {
+      final threshold = int.tryParse(lowPowerThresholdController.text.trim());
+      if (threshold == null || threshold <= 0) {
+        error.value = 'Power threshold must be a positive number.';
+        return;
+      }
+      int? dp, dur;
+      if (lowPowerTriggerMode.value == Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) {
+        dp = int.tryParse(lowPowerDpController.text.trim());
+        if (dp == null || dp <= 0) { error.value = 'Datapoints must be a positive integer.'; return; }
+      } else if (lowPowerTriggerMode.value == Enum$AlarmTriggerMode.DURATION) {
+        dur = int.tryParse(lowPowerDurController.text.trim());
+        if (dur == null || dur <= 0) { error.value = 'Duration must be a positive integer.'; return; }
+      }
+      error.value = null;
+      successMsg.value = null;
+      try {
+        await client.addOrUpdateLowPowerAlarm(
+          Input$AddOrUpdatePlusDeviceLowPowerAlarmConfigurationInput(
+            deviceId: deviceId,
+            isEnabled: lowPowerEnabled.value,
+            consumptionThresholdW: threshold,
+            triggerMode: lowPowerTriggerMode.value,
+            datapoints: dp,
+            durationSeconds: dur,
+          ),
+        );
+        successMsg.value = 'Low power alarm saved.';
+        await loadConfigs();
+      } catch (e) {
+        error.value = e.toString();
+      }
+    }
+
+    useEffect(() {
+      loadConfigs();
+      return null;
+    }, const []);
+
+    return AlertDialog(
+      title: Text('Advanced Alarms — $deviceName'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: isLoading.value
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (error.value != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          error.value!,
+                          style: TextStyle(color: Colors.red.shade700),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    if (successMsg.value != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          successMsg.value!,
+                          style: TextStyle(color: Colors.green.shade700),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // ── Offline Alarm ──────────────────────────────────────
+                    _AlarmSection(
+                      title: 'Offline Alarm',
+                      icon: Icons.wifi_off,
+                      isActive: offlineConfig.value != null,
+                      currentSummary: offlineConfig.value != null
+                          ? 'Threshold: ${offlineConfig.value!.offlineThresholdSeconds}s  '
+                            '(${offlineConfig.value!.isEnabled ? "enabled" : "disabled"})'
+                          : 'Not configured',
+                      child: Column(
+                        children: [
+                          SwitchListTile(
+                            title: const Text('Enabled'),
+                            value: offlineEnabled.value,
+                            onChanged: (v) => offlineEnabled.value = v,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          TextField(
+                            controller: offlineThresholdController,
+                            decoration: const InputDecoration(
+                              labelText: 'Threshold (seconds)',
+                              hintText: 'e.g. 600 (min 300)',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: ElevatedButton(
+                              onPressed: saveOfflineAlarm,
+                              child: const Text('Save'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Energy Usage Limit Alarm ───────────────────────────
+                    _AlarmSection(
+                      title: 'Energy Usage Limit Alarm',
+                      icon: Icons.bolt,
+                      isActive: energyConfig.value != null,
+                      currentSummary: energyConfig.value != null
+                          ? '${energyConfig.value!.energyThresholdWh} Wh / '
+                            '${energyConfig.value!.evaluationWindowMinutes} min  '
+                            '(${energyConfig.value!.isEnabled ? "enabled" : "disabled"})'
+                          : 'Not configured',
+                      child: Column(
+                        children: [
+                          SwitchListTile(
+                            title: const Text('Enabled'),
+                            value: energyEnabled.value,
+                            onChanged: (v) => energyEnabled.value = v,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          TextField(
+                            controller: energyThresholdController,
+                            decoration: const InputDecoration(
+                              labelText: 'Energy threshold (Wh)',
+                              hintText: 'e.g. 5000',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: evaluationWindowController,
+                            decoration: const InputDecoration(
+                              labelText: 'Evaluation window (minutes)',
+                              hintText: 'e.g. 60',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: ElevatedButton(
+                              onPressed: saveEnergyUsageLimitAlarm,
+                              child: const Text('Save'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Fuse Overload Alarm ────────────────────────────────
+                    _AlarmSection(
+                      title: 'Fuse Overload Alarm',
+                      icon: Icons.electrical_services,
+                      isActive: fuseConfig.value != null,
+                      currentSummary: fuseConfig.value != null
+                          ? 'Critical: ${fuseConfig.value!.criticalThresholdPercent}%  '
+                            'Warning: ${fuseConfig.value!.warningThresholdPercent}%  '
+                            '(${fuseConfig.value!.isEnabled ? "enabled" : "disabled"})'
+                          : 'Not configured',
+                      child: rmsCurrentMaxPerPhase == null
+                          ? Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade50,
+                                border: Border.all(color: Colors.amber.shade300),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.warning_amber, color: Colors.amber.shade700, size: 18),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'Max current per phase (A) must be set before configuring the fuse overload alarm. '
+                                      'Edit the device settings to set it first.',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : Column(
+                              children: [
+                                SwitchListTile(
+                                  title: const Text('Enabled'),
+                                  value: fuseEnabled.value,
+                                  onChanged: (v) => fuseEnabled.value = v,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                DropdownButtonFormField<Enum$AlarmTriggerMode>(
+                                  value: fuseTriggerMode.value,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Trigger mode',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  items: const [
+                                    DropdownMenuItem(
+                                      value: Enum$AlarmTriggerMode.SINGLE_DATAPOINT,
+                                      child: Text('Single datapoint'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS,
+                                      child: Text('Consecutive datapoints'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: Enum$AlarmTriggerMode.DURATION,
+                                      child: Text('Duration'),
+                                    ),
+                                  ],
+                                  onChanged: (v) {
+                                    if (v != null) fuseTriggerMode.value = v;
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: fuseCriticalController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Critical threshold (%)',
+                                          border: OutlineInputBorder(),
+                                        ),
+                                        keyboardType: TextInputType.number,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: fuseWarningController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Warning threshold (%)',
+                                          border: OutlineInputBorder(),
+                                        ),
+                                        keyboardType: TextInputType.number,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (fuseTriggerMode.value == Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) ...[
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
+                                          controller: fuseCriticalDpController,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Critical datapoints',
+                                            border: OutlineInputBorder(),
+                                          ),
+                                          keyboardType: TextInputType.number,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: TextField(
+                                          controller: fuseWarningDpController,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Warning datapoints',
+                                            border: OutlineInputBorder(),
+                                          ),
+                                          keyboardType: TextInputType.number,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                if (fuseTriggerMode.value == Enum$AlarmTriggerMode.DURATION) ...[
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
+                                          controller: fuseCriticalDurController,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Critical duration (s)',
+                                            border: OutlineInputBorder(),
+                                          ),
+                                          keyboardType: TextInputType.number,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: TextField(
+                                          controller: fuseWarningDurController,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Warning duration (s)',
+                                            border: OutlineInputBorder(),
+                                          ),
+                                          keyboardType: TextInputType.number,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: ElevatedButton(
+                                    onPressed: saveFuseOverloadAlarm,
+                                    child: const Text('Save'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Low Power Alarm ────────────────────────────────────
+                    _AlarmSection(
+                      title: 'Low Power Alarm',
+                      icon: Icons.power_off,
+                      isActive: lowPowerConfig.value != null,
+                      currentSummary: lowPowerConfig.value != null
+                          ? 'Threshold: ${lowPowerConfig.value!.powerThresholdW} W  '
+                            '(${lowPowerConfig.value!.isEnabled ? "enabled" : "disabled"})'
+                          : 'Not configured',
+                      child: Column(
+                        children: [
+                          SwitchListTile(
+                            title: const Text('Enabled'),
+                            value: lowPowerEnabled.value,
+                            onChanged: (v) => lowPowerEnabled.value = v,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          TextField(
+                            controller: lowPowerThresholdController,
+                            decoration: const InputDecoration(
+                              labelText: 'Power threshold (W)',
+                              hintText: 'e.g. 10',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<Enum$AlarmTriggerMode>(
+                            value: lowPowerTriggerMode.value,
+                            decoration: const InputDecoration(
+                              labelText: 'Trigger mode',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: Enum$AlarmTriggerMode.SINGLE_DATAPOINT,
+                                child: Text('Single datapoint'),
+                              ),
+                              DropdownMenuItem(
+                                value: Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS,
+                                child: Text('Consecutive datapoints'),
+                              ),
+                              DropdownMenuItem(
+                                value: Enum$AlarmTriggerMode.DURATION,
+                                child: Text('Duration'),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) lowPowerTriggerMode.value = v;
+                            },
+                          ),
+                          if (lowPowerTriggerMode.value == Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) ...[
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: lowPowerDpController,
+                              decoration: const InputDecoration(
+                                labelText: 'Datapoints',
+                                border: OutlineInputBorder(),
+                              ),
+                              keyboardType: TextInputType.number,
+                            ),
+                          ],
+                          if (lowPowerTriggerMode.value == Enum$AlarmTriggerMode.DURATION) ...[
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: lowPowerDurController,
+                              decoration: const InputDecoration(
+                                labelText: 'Duration (seconds)',
+                                border: OutlineInputBorder(),
+                              ),
+                              keyboardType: TextInputType.number,
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: ElevatedButton(
+                              onPressed: saveLowPowerAlarm,
+                              child: const Text('Save'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+}
+
+class _AlarmSection extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final bool isActive;
+  final String currentSummary;
+  final Widget child;
+
+  const _AlarmSection({
+    required this.title,
+    required this.icon,
+    required this.isActive,
+    required this.currentSummary,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        border: Border.all(
+          color: Colors.grey.shade300,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: Colors.grey),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EditDeviceSettingsDialog extends HookWidget {
   final String deviceId;
   final String deviceName;
   final String currentAlias;
+  final double? currentRmsCurrentMax;
   final SaveEyeClient client;
 
-  const _EditAliasDialog({
+  const _EditDeviceSettingsDialog({
     required this.deviceId,
     required this.deviceName,
     required this.currentAlias,
+    required this.currentRmsCurrentMax,
     required this.client,
   });
 
   @override
   Widget build(BuildContext context) {
     final aliasController = useTextEditingController(text: currentAlias);
+    final rmsController = useTextEditingController(
+      text: currentRmsCurrentMax?.toStringAsFixed(1) ?? '',
+    );
     final isLoading = useState(false);
     final error = useState<String?>(null);
 
@@ -736,10 +1464,22 @@ class _EditAliasDialog extends HookWidget {
       error.value = null;
       try {
         final name = aliasController.text.trim();
-        if (name.isEmpty) {
-          throw Exception('Alias cannot be empty');
+        if (name.isEmpty) throw Exception('Alias cannot be empty');
+
+        final rmsText = rmsController.text.trim();
+        double? rms;
+        if (rmsText.isNotEmpty) {
+          rms = double.tryParse(rmsText);
+          if (rms == null || rms <= 0) {
+            throw Exception('RMS current max must be a positive number (e.g. 16.0)');
+          }
         }
+
         await client.setDeviceAlias(deviceId, name);
+        if (rms != null) {
+          await client.setRmsCurrentMaxPerPhase(deviceId, rms);
+        }
+
         if (context.mounted) Navigator.of(context).pop(true);
       } catch (e) {
         error.value = e.toString();
@@ -749,28 +1489,40 @@ class _EditAliasDialog extends HookWidget {
     }
 
     return AlertDialog(
-      title: const Text('Edit device alias'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Device: $deviceName', style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: 16),
-          TextField(
-            controller: aliasController,
-            decoration: const InputDecoration(
-              labelText: 'Alias',
-              hintText: 'e.g. Living room',
-              border: OutlineInputBorder(),
+      title: const Text('Edit device settings'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Device: $deviceName', style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: 16),
+            TextField(
+              controller: aliasController,
+              decoration: const InputDecoration(
+                labelText: 'Alias',
+                hintText: 'e.g. Living room',
+                border: OutlineInputBorder(),
+              ),
+              textCapitalization: TextCapitalization.words,
             ),
-            textCapitalization: TextCapitalization.words,
-            onSubmitted: (_) => _save(),
-          ),
-          if (error.value != null) ...[
             const SizedBox(height: 12),
-            Text(error.value!, style: TextStyle(color: Colors.red.shade700)),
+            TextField(
+              controller: rmsController,
+              decoration: const InputDecoration(
+                labelText: 'Max current per phase (A)',
+                hintText: 'e.g. 16.0',
+                border: OutlineInputBorder(),
+                helperText: 'Leave empty to keep current value',
+              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            ),
+            if (error.value != null) ...[
+              const SizedBox(height: 12),
+              Text(error.value!, style: TextStyle(color: Colors.red.shade700)),
+            ],
           ],
-        ],
+        ),
       ),
       actions: [
         TextButton(
