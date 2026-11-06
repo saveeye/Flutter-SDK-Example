@@ -6,6 +6,11 @@ import 'package:saveeye_flutter_sdk/saveeye_flutter_sdk.dart';
 import 'device_usage_history_screen.dart';
 import 'led_state_screen.dart';
 
+/// EyeQ devices have no energy history or Plus alarms/settings.
+bool _isEyeQ(Fragment$MyDevice device) =>
+    device.deviceType == Enum$DeviceType.EYE_Q100 ||
+    device.deviceType == Enum$DeviceType.EYE_Q300;
+
 class DeviceListScreen extends HookWidget {
   const DeviceListScreen({super.key});
 
@@ -24,11 +29,9 @@ class DeviceListScreen extends HookWidget {
       if (!context.mounted) {
         return;
       }
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => const LedStateScreen(),
-        ),
-      );
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const LedStateScreen()));
     }
 
     Future<void> checkHealth() async {
@@ -92,6 +95,7 @@ class DeviceListScreen extends HookWidget {
           deviceName: device.alias ?? device.serial,
           currentAlias: device.alias ?? '',
           currentRmsCurrentMax: device.plusDevice?.rmsCurrentMaxPerPhaseAmpere,
+          showRmsCurrentMax: !_isEyeQ(device),
           client: client,
         ),
       );
@@ -224,7 +228,9 @@ class DeviceListScreen extends HookWidget {
               padding: const EdgeInsets.only(right: 8, top: 14),
               child: Icon(
                 healthOk.value! ? Icons.cloud_done : Icons.cloud_off,
-                color: healthOk.value! ? Colors.greenAccent : Colors.orangeAccent,
+                color: healthOk.value!
+                    ? Colors.greenAccent
+                    : Colors.orangeAccent,
                 size: 22,
               ),
             ),
@@ -353,11 +359,15 @@ class DeviceListScreen extends HookWidget {
                               children: [
                                 Expanded(
                                   child: InkWell(
-                                    onTap: () => _openUsage(d),
+                                    onTap: _isEyeQ(d)
+                                        ? null
+                                        : () => _openUsage(d),
                                     child: Row(
                                       children: [
-                                        const Icon(
-                                          Icons.flash_on,
+                                        Icon(
+                                          _isEyeQ(d)
+                                              ? Icons.visibility
+                                              : Icons.flash_on,
                                           size: 16,
                                           color: Colors.blue,
                                         ),
@@ -368,6 +378,14 @@ class DeviceListScreen extends HookWidget {
                                                 CrossAxisAlignment.start,
                                             children: [
                                               Text(d.alias ?? d.serial),
+                                              if (_isEyeQ(d))
+                                                Text(
+                                                  'EyeQ',
+                                                  style: TextStyle(
+                                                    color: Colors.grey[600],
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
                                               Text(
                                                 d.id,
                                                 style: TextStyle(
@@ -375,14 +393,17 @@ class DeviceListScreen extends HookWidget {
                                                   fontSize: 12,
                                                 ),
                                               ),
-                                              if (d.plusDevice?.errorCode != null)
+                                              if (d.plusDevice?.errorCode !=
+                                                  null)
                                                 Padding(
-                                                  padding: const EdgeInsets.only(
-                                                    top: 4,
-                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: 4,
+                                                      ),
                                                   child: Row(
                                                     crossAxisAlignment:
-                                                        CrossAxisAlignment.start,
+                                                        CrossAxisAlignment
+                                                            .start,
                                                     children: [
                                                       const Icon(
                                                         Icons.warning,
@@ -398,7 +419,8 @@ class DeviceListScreen extends HookWidget {
                                                           children: [
                                                             Text(
                                                               _getDeviceErrorMessage(
-                                                                d.plusDevice!
+                                                                d
+                                                                    .plusDevice!
                                                                     .errorCode!,
                                                               ),
                                                               style: TextStyle(
@@ -452,40 +474,41 @@ class DeviceListScreen extends HookWidget {
                                             ],
                                           ),
                                         ),
-                                        const Icon(
-                                          Icons.chevron_right,
-                                          size: 18,
-                                          color: Colors.grey,
-                                        ),
+                                        if (!_isEyeQ(d))
+                                          const Icon(
+                                            Icons.chevron_right,
+                                            size: 18,
+                                            color: Colors.grey,
+                                          ),
                                       ],
                                     ),
                                   ),
                                 ),
                                 IconButton(
-                                  icon: const Icon(
-                                    Icons.edit,
-                                    size: 20,
-                                  ),
+                                  icon: const Icon(Icons.edit, size: 20),
                                   tooltip: 'Edit alias & settings',
                                   onPressed: () => _showEditDeviceDialog(d),
                                 ),
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.notifications_active,
-                                    size: 20,
+                                if (!_isEyeQ(d)) ...[
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.notifications_active,
+                                      size: 20,
+                                    ),
+                                    tooltip: 'Set Alarm Thresholds',
+                                    onPressed: () =>
+                                        _showAlarmThresholdDialog(d),
                                   ),
-                                  tooltip: 'Set Alarm Thresholds',
-                                  onPressed: () => _showAlarmThresholdDialog(d),
-                                ),
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.warning_amber_rounded,
-                                    size: 20,
-                                    color: Colors.orange,
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.warning_amber_rounded,
+                                      size: 20,
+                                      color: Colors.orange,
+                                    ),
+                                    tooltip: 'Advanced Alarms',
+                                    onPressed: () => _showAlarmConfigDialog(d),
                                   ),
-                                  tooltip: 'Advanced Alarms',
-                                  onPressed: () => _showAlarmConfigDialog(d),
-                                ),
+                                ],
                                 IconButton(
                                   icon: const Icon(
                                     Icons.link_off,
@@ -560,7 +583,6 @@ String _getDeviceErrorMessage(String errorCode) {
       return 'The device reported an error. If this persists, contact customer support.';
   }
 }
-
 
 class _AlarmThresholdDialog extends HookWidget {
   final String deviceId;
@@ -656,7 +678,9 @@ class _AlarmThresholdDialog extends HookWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text('Max: ${currentMaxWh ?? '—'} Wh, Min: ${currentMinWh ?? '—'} Wh'),
+                    Text(
+                      'Max: ${currentMaxWh ?? '—'} Wh, Min: ${currentMinWh ?? '—'} Wh',
+                    ),
                   ],
                 ),
               ),
@@ -775,18 +799,22 @@ class _AlarmConfigDialog extends HookWidget {
     final successMsg = useState<String?>(null);
 
     // Current configs
-    final energyConfig = useState<
-      Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceEnergyUsageLimitAlarmConfiguration?
-    >(null);
-    final fuseConfig = useState<
-      Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceFuseOverloadAlarmConfiguration?
-    >(null);
-    final lowPowerConfig = useState<
-      Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceLowPowerAlarmConfiguration?
-    >(null);
-    final offlineConfig = useState<
-      Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceOfflineAlarmConfiguration?
-    >(null);
+    final energyConfig =
+        useState<
+          Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceEnergyUsageLimitAlarmConfiguration?
+        >(null);
+    final fuseConfig =
+        useState<
+          Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceFuseOverloadAlarmConfiguration?
+        >(null);
+    final lowPowerConfig =
+        useState<
+          Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceLowPowerAlarmConfiguration?
+        >(null);
+    final offlineConfig =
+        useState<
+          Query$GetAlarmConfigurations$deviceByIdV2$plusDevice$alarmConfigurations$$PlusDeviceOfflineAlarmConfiguration?
+        >(null);
 
     // Offline alarm controllers
     final offlineThresholdController = useTextEditingController(text: '600');
@@ -809,7 +837,9 @@ class _AlarmConfigDialog extends HookWidget {
 
     // Low power alarm controllers
     final lowPowerEnabled = useState(true);
-    final lowPowerTriggerMode = useState(Enum$AlarmTriggerMode.SINGLE_DATAPOINT);
+    final lowPowerTriggerMode = useState(
+      Enum$AlarmTriggerMode.SINGLE_DATAPOINT,
+    );
     final lowPowerThresholdController = useTextEditingController(text: '10');
     final lowPowerDpController = useTextEditingController(text: '3');
     final lowPowerDurController = useTextEditingController(text: '60');
@@ -827,12 +857,14 @@ class _AlarmConfigDialog extends HookWidget {
         lowPowerConfig.value = l;
         offlineConfig.value = o;
         if (o != null) {
-          offlineThresholdController.text = o.offlineThresholdSeconds.toString();
+          offlineThresholdController.text = o.offlineThresholdSeconds
+              .toString();
           offlineEnabled.value = o.isEnabled;
         }
         if (e != null) {
           energyThresholdController.text = e.energyThresholdWh.toString();
-          evaluationWindowController.text = e.evaluationWindowMinutes.toString();
+          evaluationWindowController.text = e.evaluationWindowMinutes
+              .toString();
           energyEnabled.value = e.isEnabled;
         }
         if (f != null) {
@@ -840,17 +872,24 @@ class _AlarmConfigDialog extends HookWidget {
           fuseTriggerMode.value = f.triggerMode;
           fuseCriticalController.text = f.criticalThresholdPercent.toString();
           fuseWarningController.text = f.warningThresholdPercent.toString();
-          if (f.criticalDatapoints != null) fuseCriticalDpController.text = f.criticalDatapoints.toString();
-          if (f.criticalDurationSeconds != null) fuseCriticalDurController.text = f.criticalDurationSeconds.toString();
-          if (f.warningDatapoints != null) fuseWarningDpController.text = f.warningDatapoints.toString();
-          if (f.warningDurationSeconds != null) fuseWarningDurController.text = f.warningDurationSeconds.toString();
+          if (f.criticalDatapoints != null)
+            fuseCriticalDpController.text = f.criticalDatapoints.toString();
+          if (f.criticalDurationSeconds != null)
+            fuseCriticalDurController.text = f.criticalDurationSeconds
+                .toString();
+          if (f.warningDatapoints != null)
+            fuseWarningDpController.text = f.warningDatapoints.toString();
+          if (f.warningDurationSeconds != null)
+            fuseWarningDurController.text = f.warningDurationSeconds.toString();
         }
         if (l != null) {
           lowPowerEnabled.value = l.isEnabled;
           lowPowerTriggerMode.value = l.triggerMode;
           lowPowerThresholdController.text = l.powerThresholdW.toString();
-          if (l.datapoints != null) lowPowerDpController.text = l.datapoints.toString();
-          if (l.durationSeconds != null) lowPowerDurController.text = l.durationSeconds.toString();
+          if (l.datapoints != null)
+            lowPowerDpController.text = l.datapoints.toString();
+          if (l.durationSeconds != null)
+            lowPowerDurController.text = l.durationSeconds.toString();
         }
       } catch (e) {
         error.value = e.toString();
@@ -919,20 +958,34 @@ class _AlarmConfigDialog extends HookWidget {
         return;
       }
       if (warning == null || warning <= 0 || warning >= critical) {
-        error.value = 'Warning threshold must be positive and less than critical threshold.';
+        error.value =
+            'Warning threshold must be positive and less than critical threshold.';
         return;
       }
       int? critDp, critDur, warnDp, warnDur;
-      if (fuseTriggerMode.value == Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) {
+      if (fuseTriggerMode.value ==
+          Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) {
         critDp = int.tryParse(fuseCriticalDpController.text.trim());
         warnDp = int.tryParse(fuseWarningDpController.text.trim());
-        if (critDp == null || critDp <= 0) { error.value = 'Critical datapoints must be a positive integer.'; return; }
-        if (warnDp == null || warnDp <= 0) { error.value = 'Warning datapoints must be a positive integer.'; return; }
+        if (critDp == null || critDp <= 0) {
+          error.value = 'Critical datapoints must be a positive integer.';
+          return;
+        }
+        if (warnDp == null || warnDp <= 0) {
+          error.value = 'Warning datapoints must be a positive integer.';
+          return;
+        }
       } else if (fuseTriggerMode.value == Enum$AlarmTriggerMode.DURATION) {
         critDur = int.tryParse(fuseCriticalDurController.text.trim());
         warnDur = int.tryParse(fuseWarningDurController.text.trim());
-        if (critDur == null || critDur <= 0) { error.value = 'Critical duration must be a positive integer.'; return; }
-        if (warnDur == null || warnDur <= 0) { error.value = 'Warning duration must be a positive integer.'; return; }
+        if (critDur == null || critDur <= 0) {
+          error.value = 'Critical duration must be a positive integer.';
+          return;
+        }
+        if (warnDur == null || warnDur <= 0) {
+          error.value = 'Warning duration must be a positive integer.';
+          return;
+        }
       }
       error.value = null;
       successMsg.value = null;
@@ -964,12 +1017,19 @@ class _AlarmConfigDialog extends HookWidget {
         return;
       }
       int? dp, dur;
-      if (lowPowerTriggerMode.value == Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) {
+      if (lowPowerTriggerMode.value ==
+          Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) {
         dp = int.tryParse(lowPowerDpController.text.trim());
-        if (dp == null || dp <= 0) { error.value = 'Datapoints must be a positive integer.'; return; }
+        if (dp == null || dp <= 0) {
+          error.value = 'Datapoints must be a positive integer.';
+          return;
+        }
       } else if (lowPowerTriggerMode.value == Enum$AlarmTriggerMode.DURATION) {
         dur = int.tryParse(lowPowerDurController.text.trim());
-        if (dur == null || dur <= 0) { error.value = 'Duration must be a positive integer.'; return; }
+        if (dur == null || dur <= 0) {
+          error.value = 'Duration must be a positive integer.';
+          return;
+        }
       }
       error.value = null;
       successMsg.value = null;
@@ -1043,7 +1103,7 @@ class _AlarmConfigDialog extends HookWidget {
                       isActive: offlineConfig.value != null,
                       currentSummary: offlineConfig.value != null
                           ? 'Threshold: ${offlineConfig.value!.offlineThresholdSeconds}s  '
-                            '(${offlineConfig.value!.isEnabled ? "enabled" : "disabled"})'
+                                '(${offlineConfig.value!.isEnabled ? "enabled" : "disabled"})'
                           : 'Not configured',
                       child: Column(
                         children: [
@@ -1083,8 +1143,8 @@ class _AlarmConfigDialog extends HookWidget {
                       isActive: energyConfig.value != null,
                       currentSummary: energyConfig.value != null
                           ? '${energyConfig.value!.energyThresholdWh} Wh / '
-                            '${energyConfig.value!.evaluationWindowMinutes} min  '
-                            '(${energyConfig.value!.isEnabled ? "enabled" : "disabled"})'
+                                '${energyConfig.value!.evaluationWindowMinutes} min  '
+                                '(${energyConfig.value!.isEnabled ? "enabled" : "disabled"})'
                           : 'Not configured',
                       child: Column(
                         children: [
@@ -1134,20 +1194,26 @@ class _AlarmConfigDialog extends HookWidget {
                       isActive: fuseConfig.value != null,
                       currentSummary: fuseConfig.value != null
                           ? 'Critical: ${fuseConfig.value!.criticalThresholdPercent}%  '
-                            'Warning: ${fuseConfig.value!.warningThresholdPercent}%  '
-                            '(${fuseConfig.value!.isEnabled ? "enabled" : "disabled"})'
+                                'Warning: ${fuseConfig.value!.warningThresholdPercent}%  '
+                                '(${fuseConfig.value!.isEnabled ? "enabled" : "disabled"})'
                           : 'Not configured',
                       child: rmsCurrentMaxPerPhase == null
                           ? Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
                                 color: Colors.amber.shade50,
-                                border: Border.all(color: Colors.amber.shade300),
+                                border: Border.all(
+                                  color: Colors.amber.shade300,
+                                ),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.warning_amber, color: Colors.amber.shade700, size: 18),
+                                  Icon(
+                                    Icons.warning_amber,
+                                    color: Colors.amber.shade700,
+                                    size: 18,
+                                  ),
                                   const SizedBox(width: 8),
                                   const Expanded(
                                     child: Text(
@@ -1175,11 +1241,13 @@ class _AlarmConfigDialog extends HookWidget {
                                   ),
                                   items: const [
                                     DropdownMenuItem(
-                                      value: Enum$AlarmTriggerMode.SINGLE_DATAPOINT,
+                                      value: Enum$AlarmTriggerMode
+                                          .SINGLE_DATAPOINT,
                                       child: Text('Single datapoint'),
                                     ),
                                     DropdownMenuItem(
-                                      value: Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS,
+                                      value: Enum$AlarmTriggerMode
+                                          .CONSECUTIVE_DATAPOINTS,
                                       child: Text('Consecutive datapoints'),
                                     ),
                                     DropdownMenuItem(
@@ -1217,7 +1285,9 @@ class _AlarmConfigDialog extends HookWidget {
                                     ),
                                   ],
                                 ),
-                                if (fuseTriggerMode.value == Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) ...[
+                                if (fuseTriggerMode.value ==
+                                    Enum$AlarmTriggerMode
+                                        .CONSECUTIVE_DATAPOINTS) ...[
                                   const SizedBox(height: 8),
                                   Row(
                                     children: [
@@ -1245,7 +1315,8 @@ class _AlarmConfigDialog extends HookWidget {
                                     ],
                                   ),
                                 ],
-                                if (fuseTriggerMode.value == Enum$AlarmTriggerMode.DURATION) ...[
+                                if (fuseTriggerMode.value ==
+                                    Enum$AlarmTriggerMode.DURATION) ...[
                                   const SizedBox(height: 8),
                                   Row(
                                     children: [
@@ -1294,7 +1365,7 @@ class _AlarmConfigDialog extends HookWidget {
                       isActive: lowPowerConfig.value != null,
                       currentSummary: lowPowerConfig.value != null
                           ? 'Threshold: ${lowPowerConfig.value!.powerThresholdW} W  '
-                            '(${lowPowerConfig.value!.isEnabled ? "enabled" : "disabled"})'
+                                '(${lowPowerConfig.value!.isEnabled ? "enabled" : "disabled"})'
                           : 'Not configured',
                       child: Column(
                         children: [
@@ -1326,7 +1397,8 @@ class _AlarmConfigDialog extends HookWidget {
                                 child: Text('Single datapoint'),
                               ),
                               DropdownMenuItem(
-                                value: Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS,
+                                value: Enum$AlarmTriggerMode
+                                    .CONSECUTIVE_DATAPOINTS,
                                 child: Text('Consecutive datapoints'),
                               ),
                               DropdownMenuItem(
@@ -1338,7 +1410,8 @@ class _AlarmConfigDialog extends HookWidget {
                               if (v != null) lowPowerTriggerMode.value = v;
                             },
                           ),
-                          if (lowPowerTriggerMode.value == Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) ...[
+                          if (lowPowerTriggerMode.value ==
+                              Enum$AlarmTriggerMode.CONSECUTIVE_DATAPOINTS) ...[
                             const SizedBox(height: 8),
                             TextField(
                               controller: lowPowerDpController,
@@ -1349,7 +1422,8 @@ class _AlarmConfigDialog extends HookWidget {
                               keyboardType: TextInputType.number,
                             ),
                           ],
-                          if (lowPowerTriggerMode.value == Enum$AlarmTriggerMode.DURATION) ...[
+                          if (lowPowerTriggerMode.value ==
+                              Enum$AlarmTriggerMode.DURATION) ...[
                             const SizedBox(height: 8),
                             TextField(
                               controller: lowPowerDurController,
@@ -1406,9 +1480,7 @@ class _AlarmSection extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
-        border: Border.all(
-          color: Colors.grey.shade300,
-        ),
+        border: Border.all(color: Colors.grey.shade300),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -1418,13 +1490,10 @@ class _AlarmSection extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: Colors.grey),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
+              Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
             ],
           ),
-          
+
           const SizedBox(height: 12),
           child,
         ],
@@ -1440,6 +1509,7 @@ class _EditDeviceSettingsDialog extends HookWidget {
   final String deviceName;
   final String currentAlias;
   final double? currentRmsCurrentMax;
+  final bool showRmsCurrentMax;
   final SaveEyeClient client;
 
   const _EditDeviceSettingsDialog({
@@ -1447,6 +1517,7 @@ class _EditDeviceSettingsDialog extends HookWidget {
     required this.deviceName,
     required this.currentAlias,
     required this.currentRmsCurrentMax,
+    required this.showRmsCurrentMax,
     required this.client,
   });
 
@@ -1471,7 +1542,9 @@ class _EditDeviceSettingsDialog extends HookWidget {
         if (rmsText.isNotEmpty) {
           rms = double.tryParse(rmsText);
           if (rms == null || rms <= 0) {
-            throw Exception('RMS current max must be a positive number (e.g. 16.0)');
+            throw Exception(
+              'RMS current max must be a positive number (e.g. 16.0)',
+            );
           }
         }
 
@@ -1495,7 +1568,10 @@ class _EditDeviceSettingsDialog extends HookWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Device: $deviceName', style: Theme.of(context).textTheme.bodyMedium),
+            Text(
+              'Device: $deviceName',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: aliasController,
@@ -1506,17 +1582,21 @@ class _EditDeviceSettingsDialog extends HookWidget {
               ),
               textCapitalization: TextCapitalization.words,
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: rmsController,
-              decoration: const InputDecoration(
-                labelText: 'Max current per phase (A)',
-                hintText: 'e.g. 16.0',
-                border: OutlineInputBorder(),
-                helperText: 'Leave empty to keep current value',
+            if (showRmsCurrentMax) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: rmsController,
+                decoration: const InputDecoration(
+                  labelText: 'Max current per phase (A)',
+                  hintText: 'e.g. 16.0',
+                  border: OutlineInputBorder(),
+                  helperText: 'Leave empty to keep current value',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
               ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            ),
+            ],
             if (error.value != null) ...[
               const SizedBox(height: 12),
               Text(error.value!, style: TextStyle(color: Colors.red.shade700)),
@@ -1532,7 +1612,11 @@ class _EditDeviceSettingsDialog extends HookWidget {
         ElevatedButton(
           onPressed: isLoading.value ? null : _save,
           child: isLoading.value
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('Save'),
         ),
       ],
